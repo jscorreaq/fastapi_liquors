@@ -66,12 +66,28 @@ fastapi_liquors/
 
 ## 💻 Desarrollo Local
 
-1. Inicia el servidor de desarrollo:
+1. Asegúrate de estar en el directorio raíz del proyecto:
 ```bash
+cd fastapi_liquors
+```
+
+2. Crea un archivo `__init__.py` vacío en el directorio `app` si no existe:
+```bash
+type nul > app/__init__.py  # En Windows
+# O
+touch app/__init__.py       # En Linux/Mac
+```
+
+3. Inicia el servidor de desarrollo:
+```bash
+# Opción 1 (recomendada):
+python -m uvicorn app.main:app --reload
+
+# Opción 2 (alternativa):
 uvicorn app.main:app --reload
 ```
 
-2. Accede a la documentación interactiva:
+4. Accede a la documentación interactiva:
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
@@ -220,3 +236,62 @@ Juan Sebastián Correa - [@jscorreaq](https://github.com/jscorreaq)
 Link del Proyecto: [https://github.com/jscorreaq/fastapi_liquors](https://github.com/jscorreaq/fastapi_liquors)
 
 API en Railway: [https://fastapi-liquors-production.up.railway.app/](https://fastapi-liquors-production.up.railway.app/)
+
+## ❗ Solución de Problemas Comunes
+
+### Error de Importación del Módulo
+
+Si encuentras este error:
+```
+ImportError: attempted relative import with no known parent package
+```
+
+**Solución 1**: Usar la forma correcta de ejecutar la aplicación:
+```bash
+python -m uvicorn app.main:app --reload
+```
+
+**Solución 2**: Modificar las importaciones en `main.py`:
+Cambiar:
+```python
+from .database import engine, get_db
+```
+Por:
+```python
+from app.database import engine, get_db
+```
+
+### Error de ORM Mode en Pydantic
+
+Si ves esta advertencia:
+```
+UserWarning: Valid config keys have changed in V2:
+* 'orm_mode' has been renamed to 'from_attributes'
+```
+
+**Solución**: Actualizar los schemas en `schemas.py`:
+Cambiar:
+```python
+class Config:
+    orm_mode = True
+```
+Por:
+```python
+class Config:
+    from_attributes = True
+```
+
+### Error de Base de Datos
+
+Si encuentras errores de conexión a la base de datos:
+
+1. Verifica que el archivo `fastapi_liquors.db` se haya creado:
+```bash
+# En Windows
+dir app\fastapi_liquors.db
+
+# En Linux/Mac
+ls app/fastapi_liquors.db
+```
+
+2. Si no existe, la base de datos se creará automáticamente al iniciar la aplicación.
