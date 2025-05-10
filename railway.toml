@@ -1,6 +1,7 @@
 [build]
 builder = "nixpacks"
 buildCommand = "pip install -r requirements.txt"
+nixpacksConfigPath = "nixpacks.toml"
 
 [deploy]
 startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
@@ -9,4 +10,5 @@ healthcheckTimeout = 100
 restartPolicyType = "on_failure"
 
 [deploy.env]
-PYTHON_VERSION = "3.9.16" 
+PYTHON_VERSION = "3.9.16"
+NIXPACKS_PKGS = "postgresql_16" 
