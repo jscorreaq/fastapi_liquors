@@ -5,6 +5,7 @@ from . import crud, models, schemas
 from .database import engine, get_db, verify_tables
 from datetime import datetime
 import logging
+from sqlalchemy.exc import SQLAlchemyError
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -38,7 +39,7 @@ async def startup_event():
 #############################################
 
 @app.post("/licores/", response_model=schemas.Liquor, tags=["Licores"])
-def create_liquor(liquor: schemas.LiquorCreate, db: Session = Depends(get_db)):
+async def create_liquor(liquor: schemas.LiquorCreate, db: Session = Depends(get_db)):
     """
     Crear un nuevo licor
     - **name**: Nombre del licor
@@ -52,13 +53,33 @@ def create_liquor(liquor: schemas.LiquorCreate, db: Session = Depends(get_db)):
     - **supplier**: Proveedor
     """
     try:
-        logger.info(f"Intentando crear licor: {liquor.dict()}")
+        logger.info(f"Recibida solicitud POST para crear licor: {liquor.dict()}")
+        
+        # Validar que el precio sea positivo
+        if liquor.price <= 0:
+            raise HTTPException(status_code=400, detail="El precio debe ser mayor que 0")
+        
+        # Validar que el stock no sea negativo
+        if liquor.stock < 0:
+            raise HTTPException(status_code=400, detail="El stock no puede ser negativo")
+        
+        # Crear el licor
         db_liquor = crud.create_liquor(db=db, liquor=liquor)
         logger.info(f"Licor creado exitosamente con ID: {db_liquor.id}")
+        
         return db_liquor
+    except SQLAlchemyError as e:
+        logger.error(f"Error de base de datos al crear licor: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Error interno del servidor al crear el licor"
+        )
     except Exception as e:
-        logger.error(f"Error al crear licor: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error inesperado al crear licor: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
 @app.get("/licores/", response_model=List[schemas.Liquor], tags=["Licores"])
 def read_liquors(

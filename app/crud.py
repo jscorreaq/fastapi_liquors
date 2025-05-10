@@ -2,18 +2,41 @@ from sqlalchemy.orm import Session
 from . import models, schemas
 from typing import List, Optional
 from datetime import datetime
+import logging
+from sqlalchemy.exc import SQLAlchemyError
 
 #############################################
 # OPERACIONES CRUD PARA LICORES
 #############################################
 
+# Configurar logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 def get_liquors(db: Session, skip: int = 0, limit: int = 100) -> List[models.Liquor]:
     """Obtiene lista de licores con paginación"""
-    return db.query(models.Liquor).offset(skip).limit(limit).all()
+    try:
+        logger.info(f"Obteniendo licores (skip={skip}, limit={limit})")
+        liquors = db.query(models.Liquor).offset(skip).limit(limit).all()
+        logger.info(f"Se encontraron {len(liquors)} licores")
+        return liquors
+    except SQLAlchemyError as e:
+        logger.error(f"Error al obtener licores: {str(e)}")
+        raise
 
 def get_liquor(db: Session, liquor_id: int) -> Optional[models.Liquor]:
     """Obtiene un licor por su ID"""
-    return db.query(models.Liquor).filter(models.Liquor.id == liquor_id).first()
+    try:
+        logger.info(f"Buscando licor con ID: {liquor_id}")
+        liquor = db.query(models.Liquor).filter(models.Liquor.id == liquor_id).first()
+        if liquor:
+            logger.info(f"Licor encontrado: {liquor.name}")
+        else:
+            logger.warning(f"No se encontró licor con ID: {liquor_id}")
+        return liquor
+    except SQLAlchemyError as e:
+        logger.error(f"Error al buscar licor: {str(e)}")
+        raise
 
 def get_liquors_by_category(db: Session, category: models.LiquorCategory) -> List[models.Liquor]:
     """Obtiene licores por categoría"""
@@ -28,11 +51,20 @@ def create_liquor(db: Session, liquor: schemas.LiquorCreate) -> models.Liquor:
     Returns:
         El licor creado
     """
-    db_liquor = models.Liquor(**liquor.dict())
-    db.add(db_liquor)
-    db.commit()
-    db.refresh(db_liquor)
-    return db_liquor
+    try:
+        logger.info(f"Creando nuevo licor: {liquor.dict()}")
+        db_liquor = models.Liquor(**liquor.dict())
+        db.add(db_liquor)
+        db.flush()  # Flush para obtener el ID antes del commit
+        logger.info(f"Licor creado con ID: {db_liquor.id}")
+        db.commit()
+        logger.info("Transacción completada exitosamente")
+        db.refresh(db_liquor)
+        return db_liquor
+    except SQLAlchemyError as e:
+        logger.error(f"Error al crear licor: {str(e)}")
+        db.rollback()
+        raise
 
 def update_liquor(db: Session, liquor_id: int, liquor_data: schemas.LiquorUpdate) -> Optional[models.Liquor]:
     """
@@ -44,24 +76,38 @@ def update_liquor(db: Session, liquor_id: int, liquor_data: schemas.LiquorUpdate
     Returns:
         El licor actualizado o None si no existe
     """
-    db_liquor = get_liquor(db, liquor_id)
-    if db_liquor:
-        # Actualizamos solo los campos que vienen en la petición
-        update_data = liquor_data.dict(exclude_unset=True)
-        for key, value in update_data.items():
-            setattr(db_liquor, key, value)
-        db_liquor.updated_at = datetime.utcnow()
-        db.commit()
-        db.refresh(db_liquor)
-    return db_liquor
+    try:
+        logger.info(f"Actualizando licor ID: {liquor_id}")
+        db_liquor = get_liquor(db, liquor_id)
+        if db_liquor:
+            update_data = liquor_data.dict(exclude_unset=True)
+            for key, value in update_data.items():
+                setattr(db_liquor, key, value)
+            db_liquor.updated_at = datetime.utcnow()
+            db.flush()
+            logger.info(f"Licor actualizado: {db_liquor.name}")
+            db.commit()
+            db.refresh(db_liquor)
+        return db_liquor
+    except SQLAlchemyError as e:
+        logger.error(f"Error al actualizar licor: {str(e)}")
+        db.rollback()
+        raise
 
 def delete_liquor(db: Session, liquor_id: int) -> Optional[models.Liquor]:
     """Elimina un licor de la base de datos"""
-    db_liquor = get_liquor(db, liquor_id)
-    if db_liquor:
-        db.delete(db_liquor)
-        db.commit()
-    return db_liquor
+    try:
+        logger.info(f"Eliminando licor ID: {liquor_id}")
+        db_liquor = get_liquor(db, liquor_id)
+        if db_liquor:
+            db.delete(db_liquor)
+            db.commit()
+            logger.info(f"Licor eliminado: {db_liquor.name}")
+        return db_liquor
+    except SQLAlchemyError as e:
+        logger.error(f"Error al eliminar licor: {str(e)}")
+        db.rollback()
+        raise
 
 #############################################
 # OPERACIONES CRUD PARA VENTAS
@@ -75,39 +121,47 @@ def create_sale(db: Session, sale: schemas.SaleCreate) -> models.Sale:
     2. Crear las líneas de venta
     3. Actualizar el inventario de los productos vendidos
     """
-    # 1. Crear la venta principal
-    db_sale = models.Sale(
-        customer_name=sale.customer_name,
-        customer_id=sale.customer_id,
-        total=sale.total,
-        payment_method=sale.payment_method
-    )
-    db.add(db_sale)
-    db.flush()  # Obtenemos el ID de la venta antes de crear las líneas
-
-    # 2. Crear las líneas de venta y 3. Actualizar inventario
-    for line in sale.sale_lines:
-        # Creamos la línea de venta
-        db_sale_line = models.SaleLine(
-            sale_id=db_sale.id,
-            liquor_id=line.liquor_id,
-            quantity=line.quantity,
-            unit_price=line.unit_price,
-            subtotal=line.subtotal
+    try:
+        logger.info("Iniciando creación de venta")
+        # 1. Crear la venta principal
+        db_sale = models.Sale(
+            customer_name=sale.customer_name,
+            customer_id=sale.customer_id,
+            total=sale.total,
+            payment_method=sale.payment_method
         )
-        db.add(db_sale_line)
+        db.add(db_sale)
+        db.flush()  # Obtenemos el ID de la venta antes de crear las líneas
+        logger.info(f"Venta creada con ID: {db_sale.id}")
 
-        # Actualizamos el inventario del licor
-        liquor = get_liquor(db, line.liquor_id)
-        if liquor:
-            liquor.stock -= line.quantity
-            # Actualizamos la disponibilidad basada en el stock
-            liquor.is_available = liquor.stock > 0
+        # 2. Crear las líneas de venta y 3. Actualizar inventario
+        for line in sale.sale_lines:
+            # Creamos la línea de venta
+            db_sale_line = models.SaleLine(
+                sale_id=db_sale.id,
+                liquor_id=line.liquor_id,
+                quantity=line.quantity,
+                unit_price=line.unit_price,
+                subtotal=line.subtotal
+            )
+            db.add(db_sale_line)
 
-    # Confirmamos todos los cambios en una sola transacción
-    db.commit()
-    db.refresh(db_sale)
-    return db_sale
+            # Actualizamos el inventario del licor
+            liquor = get_liquor(db, line.liquor_id)
+            if liquor:
+                liquor.stock -= line.quantity
+                liquor.is_available = liquor.stock > 0
+                logger.info(f"Stock actualizado para licor {liquor.id}: {liquor.stock}")
+
+        # Confirmamos todos los cambios en una sola transacción
+        db.commit()
+        logger.info("Venta completada exitosamente")
+        db.refresh(db_sale)
+        return db_sale
+    except SQLAlchemyError as e:
+        logger.error(f"Error al crear venta: {str(e)}")
+        db.rollback()
+        raise
 
 def get_sale(db: Session, sale_id: int) -> Optional[models.Sale]:
     """Obtiene una venta específica por su ID"""
