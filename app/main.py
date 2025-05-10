@@ -2,11 +2,20 @@ from fastapi import FastAPI, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from . import crud, models, schemas
-from .database import engine, get_db
+from .database import engine, get_db, verify_tables
 from datetime import datetime
+import logging
 
-# Creamos las tablas en la base de datos
+# Configurar logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Crear las tablas de la base de datos
 models.Base.metadata.create_all(bind=engine)
+
+# Verificar las tablas creadas
+tables = verify_tables()
+logger.info(f"Tablas disponibles en la base de datos: {tables}")
 
 # Inicializamos la aplicación FastAPI
 app = FastAPI(
@@ -14,6 +23,15 @@ app = FastAPI(
     description="API para gestión de tienda de licores",
     version="1.0.0"
 )
+
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Iniciando la aplicación...")
+    tables = verify_tables()
+    if not tables:
+        logger.warning("No se encontraron tablas en la base de datos")
+    else:
+        logger.info(f"Tablas encontradas: {tables}")
 
 #############################################
 # ENDPOINTS PARA LICORES
@@ -33,7 +51,14 @@ def create_liquor(liquor: schemas.LiquorCreate, db: Session = Depends(get_db)):
     - **stock**: Cantidad en inventario
     - **supplier**: Proveedor
     """
-    return crud.create_liquor(db=db, liquor=liquor)
+    try:
+        logger.info(f"Intentando crear licor: {liquor.dict()}")
+        db_liquor = crud.create_liquor(db=db, liquor=liquor)
+        logger.info(f"Licor creado exitosamente con ID: {db_liquor.id}")
+        return db_liquor
+    except Exception as e:
+        logger.error(f"Error al crear licor: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/licores/", response_model=List[schemas.Liquor], tags=["Licores"])
 def read_liquors(
@@ -48,9 +73,18 @@ def read_liquors(
     - **limit**: Número máximo de registros a retornar
     - **category**: Filtrar por categoría
     """
-    if category:
-        return crud.get_liquors_by_category(db, category)
-    return crud.get_liquors(db, skip=skip, limit=limit)
+    try:
+        if category:
+            logger.info(f"Buscando licores por categoría: {category}")
+            liquors = crud.get_liquors_by_category(db, category)
+        else:
+            logger.info(f"Obteniendo lista de licores (skip={skip}, limit={limit})")
+            liquors = crud.get_liquors(db, skip=skip, limit=limit)
+        logger.info(f"Se encontraron {len(liquors)} licores")
+        return liquors
+    except Exception as e:
+        logger.error(f"Error al obtener licores: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/licores/{liquor_id}", response_model=schemas.Liquor, tags=["Licores"])
 def read_liquor(liquor_id: int, db: Session = Depends(get_db)):
